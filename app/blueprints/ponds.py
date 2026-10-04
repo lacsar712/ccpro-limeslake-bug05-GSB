@@ -3,8 +3,7 @@ from flask_login import current_user, login_required
 
 from app.extensions import db
 from app.models import Plant, Pond
-from app.services.draw_acl import ponds_edit_allows_drawn
-from app.services.rules import RuleError, assert_can_set_pond_status
+from app.services.rules import RuleError, set_pond_status
 
 bp = Blueprint("ponds", __name__, url_prefix="/ponds")
 
@@ -82,18 +81,18 @@ def edit_pond(pond_id: int):
             flash("同一厂区内池编号必须唯一", "error")
         else:
             try:
-                if status == Pond.STATUS_DRAWN and not ponds_edit_allows_drawn(current_user):
-                    raise RuleError("台账入口拒绝出灰")
-                assert_can_set_pond_status(pond, status)
                 pond.plant_id = plant_id
                 pond.code = code
-                pond.status = status
                 pond.capacity_m3 = capacity
                 pond.notes = notes
+                # 授权（仅管理员）与峰值 >= 60℃ 门槛都在服务层统一校验，
+                # 出灰走条件更新，并发抢点只落一笔。
+                set_pond_status(pond, status, current_user)
                 db.session.commit()
                 flash("熟化池已更新", "ok")
                 return redirect(url_for("board.floor_plan", plant_id=plant_id, pond=pond.id))
             except RuleError as exc:
+                db.session.rollback()
                 flash(str(exc), "error")
     return render_template(
         "ponds/form.html",

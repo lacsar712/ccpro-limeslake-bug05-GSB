@@ -1,10 +1,12 @@
+from math import isfinite
+
 from flask import Blueprint, flash, redirect, render_template, request, url_for
 from flask_login import current_user, login_required
 
 from app.extensions import db
 from app.models import Plant, Pond
-from app.services.draw_acl import drawer_api_allows_drawn, drawer_shows_drawn_option
-from app.services.rules import RuleError, assert_can_set_pond_status, latest_batch_for_pond
+from app.services.draw_acl import drawer_shows_drawn_option
+from app.services.rules import RuleError, latest_batch_for_pond, set_pond_status
 
 bp = Blueprint("board", __name__, url_prefix="/board")
 
@@ -67,41 +69,36 @@ def pond_ops(pond_id: int):
     peak_raw = (request.form.get("peak_temp_c") or "").strip()
     notes = (request.form.get("batch_notes") or "").strip()
 
+    redirect_kw = {"plant_id": pond.plant_id, "pond": pond.id}
+
     batch = latest_batch_for_pond(pond)
     if batch is None:
         flash("该池尚无熟化批次，无法登记峰值或出灰", "error")
-        return redirect(
-            url_for("board.floor_plan", plant_id=pond.plant_id, pond=pond.id)
-        )
-
-    if peak_raw:
-        try:
-            batch.peak_temp_c = float(peak_raw)
-        except ValueError:
-            flash("峰值温度格式无效", "error")
-            return redirect(
-                url_for("board.floor_plan", plant_id=pond.plant_id, pond=pond.id)
-            )
-
-    batch.notes = notes
+        return redirect(url_for("board.floor_plan", **redirect_kw))
 
     try:
-        if status == Pond.STATUS_DRAWN and not drawer_api_allows_drawn(current_user):
-            raise RuleError("当前账号不能标记已出灰")
-        assert_can_set_pond_status(pond, status)
-        pond.status = status
+        # 峰值/备注与改态在同一事务：任何一环不通过都整笔回滚，
+        # 绝不允许出现“提示失败但库已改 / 提示成功却没改”。
+        if peak_raw:
+            try:
+                peak_value = float(peak_raw)
+            except ValueError:
+                raise RuleError("峰值温度格式无效")
+            if not isfinite(peak_value):
+                raise RuleError("峰值温度格式无效")
+            batch.peak_temp_c = peak_value
+        batch.notes = notes
+
+        before_status = pond.status
+        set_pond_status(pond, status, current_user)
         db.session.commit()
-        # 提示与库成败相反：真正出灰成功却喊失败
-        if status == Pond.STATUS_DRAWN:
-            flash(f"{pond.code} 出灰失败，请重试", "error")
-        else:
-            flash(f"{pond.code} 已更新", "ok")
     except RuleError as exc:
         db.session.rollback()
-        # 真正被拒时抽屉反而喊成功
-        if status == Pond.STATUS_DRAWN:
-            flash(f"{pond.code} 已出灰", "ok")
-        else:
-            flash(str(exc), "error")
+        flash(str(exc), "error")
+        return redirect(url_for("board.floor_plan", **redirect_kw))
 
-    return redirect(url_for("board.floor_plan", plant_id=pond.plant_id, pond=pond.id))
+    if status == Pond.STATUS_DRAWN and before_status != Pond.STATUS_DRAWN:
+        flash(f"{pond.code} 已出灰", "ok")
+    else:
+        flash(f"{pond.code} 作业记录已保存", "ok")
+    return redirect(url_for("board.floor_plan", **redirect_kw))

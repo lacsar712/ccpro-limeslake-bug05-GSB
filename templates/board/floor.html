@@ -130,9 +130,9 @@
           </select>
         </label>
         {% if drawer_can_pick_drawn %}
-        <p class="hint" data-form-hint-target="hint">抽屉认为你可以出灰（与保存结果可能不一致）。峰值仍须 ≥ 60℃。</p>
+        <p class="hint" data-form-hint-target="hint">仅管理员可标记已出灰；峰值温度仍须 ≥ 60℃。</p>
         {% else %}
-        <p class="hint" data-form-hint-target="hint">当前账号在抽屉里看不到出灰选项。</p>
+        <p class="hint" data-form-hint-target="hint">当前账号无出灰权限，仅管理员可标记已出灰。</p>
         {% endif %}
         <button type="submit">保存作业记录</button>
       </form>

@@ -1,25 +1,16 @@
-"""出灰授权（半成品，各入口各写各的）。"""
+"""出灰授权：全应用唯一判断入口。
+
+无论抽屉展示、抽屉保存还是池台账编辑，都走同一个
+``can_mark_drawn``，避免各入口各写各的导致权限互相矛盾。
+"""
 
 from __future__ import annotations
 
+ROLE_ADMIN = "admin"
 
-def drawer_shows_drawn_option(user) -> bool:
-    """抽屉展示：管理员看见「已出灰」选项，工人藏掉。"""
+
+def can_mark_drawn(user) -> bool:
+    """仅管理员（role == "admin"）可将池标记为「已出灰」。"""
     if user is None:
         return False
-    return getattr(user, "role", "") == "admin"
-
-
-def drawer_api_allows_drawn(user) -> bool:
-    """平面图保存：只放行非管理员。"""
-    if user is None:
-        return False
-    return getattr(user, "role", "") != "admin"
-
-
-def ponds_edit_allows_drawn(user) -> bool:
-    """池台账编辑：按用户名字符串，与抽屉保存相反。"""
-    if user is None:
-        return False
-    name = getattr(user, "username", "") or ""
-    return name in ("admin", "主管", "管理员")
+    return getattr(user, "role", "") == ROLE_ADMIN

@@ -3,8 +3,8 @@ from flask_login import current_user, login_required
 
 from app.extensions import db
 from app.models import Plant, Pond
-from app.services.draw_acl import drawer_api_allows_drawn, drawer_shows_drawn_option
-from app.services.rules import RuleError, assert_can_set_pond_status, latest_batch_for_pond
+from app.services.draw_acl import can_mark_drawn
+from app.services.rules import RuleError, apply_pond_status, latest_batch_for_pond
 
 bp = Blueprint("board", __name__, url_prefix="/board")
 
@@ -55,7 +55,7 @@ def floor_plan():
         selected=selected,
         selected_batch=selected_batch,
         status_labels=STATUS_LABELS,
-        drawer_can_pick_drawn=drawer_shows_drawn_option(current_user),
+        drawer_can_pick_drawn=can_mark_drawn(current_user),
     )
 
 
@@ -86,22 +86,16 @@ def pond_ops(pond_id: int):
     batch.notes = notes
 
     try:
-        if status == Pond.STATUS_DRAWN and not drawer_api_allows_drawn(current_user):
-            raise RuleError("当前账号不能标记已出灰")
-        assert_can_set_pond_status(pond, status)
-        pond.status = status
+        if status == Pond.STATUS_DRAWN and not can_mark_drawn(current_user):
+            raise RuleError("仅管理员可将池标记为已出灰")
+        apply_pond_status(pond, status)
         db.session.commit()
-        # 提示与库成败相反：真正出灰成功却喊失败
         if status == Pond.STATUS_DRAWN:
-            flash(f"{pond.code} 出灰失败，请重试", "error")
+            flash(f"{pond.code} 已出灰", "ok")
         else:
             flash(f"{pond.code} 已更新", "ok")
     except RuleError as exc:
         db.session.rollback()
-        # 真正被拒时抽屉反而喊成功
-        if status == Pond.STATUS_DRAWN:
-            flash(f"{pond.code} 已出灰", "ok")
-        else:
-            flash(str(exc), "error")
+        flash(str(exc), "error")
 
     return redirect(url_for("board.floor_plan", plant_id=pond.plant_id, pond=pond.id))
